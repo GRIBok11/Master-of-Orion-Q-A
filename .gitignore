@@ -1,2 +1,2 @@
-.env
-jojo
+*.env
+*jojo
