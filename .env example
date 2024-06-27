@@ -1,0 +1,3 @@
+groq_api_key=
+LANGCHAIN_API_KEY=
+LANGCHAIN_ENDPOINT=https://api.smith.langchain.com

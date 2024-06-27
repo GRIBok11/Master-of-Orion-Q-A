@@ -12,6 +12,7 @@ langchain-huggingface = "^0.0.3"
 langchain-community = "^0.2.5"
 langchain-chroma = "^0.1.1"
 pypdf = "^4.2.0"
+python-dotenv = "^1.0.1"
 
 
 [build-system]
