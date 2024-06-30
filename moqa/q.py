@@ -1,17 +1,27 @@
 from dotenv import load_dotenv
 import os
+from langsmith import Client
 
 # Загрузка переменных из .env файла
 load_dotenv()
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_PROJECT"] = "Alfa"
 
-# Получение значений переменных окружения
-database_url = os.getenv('DATABASE_URL')
-secret_key = os.getenv('SECRET_KEY')
-debug_mode = os.getenv('DEBUG', 'False')  # По умолчанию 'False'
 
-# Преобразование переменной DEBUG к логическому типу
-debug_mode = debug_mode.lower() in ['true', '1', 't', 'yes', 'y']
+from langsmith import Client
+import os
 
-print(f'Database URL: {database_url}')
-print(f'Secret Key: {secret_key}')
-print(f'Debug Mode: {debug_mode}')
+client = Client()
+
+datasets = list(client.list_datasets())
+
+examples = list(client.list_examples("9ccd2582-4e24-4e38-874f-db7a16a206f2"))
+from langsmith.schemas import Example, Run
+
+from langsmith import Client
+
+client = Client()
+
+f
+
+

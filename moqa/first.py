@@ -17,6 +17,19 @@ import os
 
 # Загрузка переменных из .env файла
 load_dotenv()
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_PROJECT"] = "Alfa"
+
+
+from langsmith import Client
+
+client = Client()
+
+datasets = list(client.list_datasets())
+
+examples = list(client.list_examples("9ccd2582-4e24-4e38-874f-db7a16a206f2"))
+# Загрузка переменных из .env файла
+
 groq_api_key1 = os.getenv('groq_api_key')
 
 llm = ChatGroq(
@@ -25,7 +38,6 @@ llm = ChatGroq(
     model_name="mixtral-8x7b-32768"
 )
 
-print(llm.invoke("првиет как твои дела"))
 embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 
@@ -39,7 +51,7 @@ all_splits  = text_splitter.split_documents(docs)
 
 
 vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function)
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10})
+retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
 
 
@@ -47,6 +59,9 @@ system_prompt = (
   "You are an assistant for question-answering tasks.Provide the answer as a single keyword, number, or name only. "
   "Use the following pieces of retrieved context to answer "
   "the question. If you don't know the answer, say that you "
+  "for example if the question is: how much damage does a cyborg weapon deal, then the answer will be: 12, "
+  "that is, only the amount of damage in numerical value,"
+   " or if the question is: what armor has 30 protection, then the answer will only be the name of this armor"
   "don't know. "
   "\n\n"
   "{context}"
@@ -87,15 +102,22 @@ def generate_rephrased_queries(query):
     return new_query
 
 
+from langchain.retrievers.multi_query import MultiQueryRetriever
+
 def enhanced_invoke(input_query):
-    new_query=generate_rephrased_queries(input_query)
-    question_answer_chain = create_stuff_documents_chain(llm, prompt)
-    rag_chain = create_retrieval_chain(retriever, question_answer_chain)
-    response = rag_chain.invoke({"input": new_query})
-    chain_= llm | output_parser
-    final_answer = chain_.invoke(f"Give one concise answer based on these: {response["answer"]}")
+    new_query = generate_rephrased_queries(input_query)
+    
+    # Configure MultiQueryRetriever
+    multi_query_retriever = MultiQueryRetriever.from_llm(retriever=retriever,llm=llm)
+    
+    # Combine queries and retrieve answers
+    combined_response = multi_query_retriever.invoke(new_query)
+    
+    chain = llm | output_parser
+    final_answer = chain.invoke(f"Give one concise answer based on these: {combined_response}")
+    
     return final_answer
 
 
-text="How many points of damage do proton torpedoes inflict?"
-
+for example in examples:
+    print(enhanced_invoke(example.inputs['Вопрос']))

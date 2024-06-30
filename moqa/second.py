@@ -8,9 +8,26 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 import warnings
 from huggingface_hub import file_download
+from langsmith import Client
+from langsmith.schemas import Example, Feedback, Run
+from datetime import datetime
+import uuid
+import os
+from dotenv import load_dotenv
+from langchain_core.output_parsers import StrOutputParser
+
 warnings.filterwarnings("ignore", category=FutureWarning, module='huggingface_hub.file_download')
 
-groq_api_key1="???"
+# Загрузка переменных из .env файла
+load_dotenv()
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
+os.environ["LANGCHAIN_PROJECT"] = "Alfa"
+
+client = Client()
+datasets = list(client.list_datasets())
+examples = list(client.list_examples("9ccd2582-4e24-4e38-874f-db7a16a206f2"))
+
+groq_api_key1 = os.getenv('groq_api_key')
 
 llm = ChatGroq(
     temperature=0,
@@ -19,31 +36,40 @@ llm = ChatGroq(
 )
 
 
-embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
+
+embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 pdf_file_path = "moo2_manual.pdf"
 loader = PyPDFLoader(pdf_file_path)
 docs = loader.load()
 
-
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-all_splits  = text_splitter.split_documents(docs)
-
+all_splits = text_splitter.split_documents(docs)
 
 vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function)
 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10})
 
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+output_parser = StrOutputParser()
+
+def generate_rephrased_queries(query):
+    template = """
+     what might the answer to this question look like,
+       provided that he asks the question {query} in the context of a game,
+         but not in a specific but abstract way
+    """
+    prompt = ChatPromptTemplate.from_template(template)
+    chain = prompt | llm | output_parser
+    new_query = chain.invoke(query)
+    return new_query
 
 system_prompt = (
   "You are an assistant for question-answering tasks.Provide the answer as a single keyword, number, or name only. "
   "Use the following pieces of retrieved context to answer "
   "the question. If you don't know the answer, say that you "
+  "for example if the question is: how much damage does a cyborg weapon deal, then the answer will be: 12, "
+  "that is, only the amount of damage in numerical value,"
+   " or if the question is: what armor has 30 protection, then the answer will only be the name of this armor"
   "don't know. "
   "\n\n"
   "{context}"
@@ -56,56 +82,42 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-
-llm_rephrase = ChatGroq(
-    temperature=1,  
-    groq_api_key=groq_api_key1,
-    model_name="mixtral-8x7b-32768"
-)
-from langchain_core.prompts import ChatPromptTemplate
-output_parser = StrOutputParser()
-
-def generate_rephrased_queries(query):
-    
-    template = """
-     what might the answer to this question look like,
-       provided that he asks the question {query} in the context of a game,
-         but not in a specific but abstract way
-    """
-    prompt = ChatPromptTemplate.from_template(template)
-    chain = prompt | llm_rephrase | output_parser
-    
-    new_query = chain.invoke(query)
-    
-    return new_query
-
-
 def answ(text):
     question_answer_chain = create_stuff_documents_chain(llm, prompt)
     rag_chain = create_retrieval_chain(retriever, question_answer_chain)
     response = rag_chain.invoke({"input": generate_rephrased_queries(text)})
     return response["answer"]
 
-print(answ("Maintenance cost of deep core mines in BC?"))
-print(answ("Which form of government do Trilarians have?"))
-print(answ("What is the downside of Klackons?"))
-print(answ("Which two spy roles are there?"))
-print(answ("Which ability is the opposite of Uncreative?"))
-print(answ("How many levels of miniaturisation do I need for Enveloping weapon mod?"))
-print(answ("What is makes proton torpedoes special?")) #d
-print(answ("Which race has the most technological advantage?")) #d
-print(answ("Which penalty do Psilons have?"))
-print(answ("Which race can colonize pretty much every world?")) #d
-print(answ("Which system makes ships harder to target in combat and easier to turn?"))#d
-print(answ("Which armor can add 15 body strength to ground troops?")) #d
-print(answ("Which button is used to send troops to capture another ship?"))
-print(answ("Which system allows to transit between colonies in one turn?"))# so so
-print(answ("How to destroy a planet?"))#d
-print(answ("What is the biggest ship?"))
-print(answ("What is the best armor?"))# so os
-print(answ("What is the weakest armor?"))#y
-print(answ("What tech is provided by the highest level of Sociology?")) #d
-print(answ("Which tech is provided by Genetic Mutations?"))#s
-print(answ("Which tech is provided by Tachyon Physics?"))#d
-print(answ("Which types of androids are there?"))
 
+
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langsmith.evaluation import evaluate
+
+# Target task definition
+prompt = ChatPromptTemplate.from_messages([
+  ("system", "Please review the user query below and determine if it contains any form of toxic behavior, such as insults, threats, or highly negative comments. Respond with 'Toxic' if it does, and 'Not toxic' if it doesn't."),
+  ("user", "{undefined}")
+])
+chat_model = ChatOpenAI()
+output_parser = StrOutputParser()
+
+chain = prompt | llm | output_parser
+
+# The name or UUID of the LangSmith dataset to evaluate on.
+# Alternatively, you can pass an iterator of examples
+data = "HelloDataset1"
+
+# A string to prefix the experiment name with.
+# If not provided, a random string will be generated.
+experiment_prefix = "HelloDataset1"
+
+# Evaluate the target task
+results = evaluate(
+  chain.invoke,
+  data=data,
+  experiment_prefix=experiment_prefix,
+)
+
+ 
