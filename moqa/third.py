@@ -1,8 +1,14 @@
+import warnings
+from datetime import datetime
+from operator import itemgetter
+import os
+from dotenv import load_dotenv
+
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, RecursiveUrlLoader
 from langchain_chroma import Chroma
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, TokenTextSplitter
 from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
@@ -11,41 +17,19 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain.prompts import PromptTemplate
 from langchain.smith import RunEvalConfig
 from langchain.retrievers.multi_query import MultiQueryRetriever
-import warnings
 from huggingface_hub import file_download
+
 warnings.filterwarnings("ignore", category=FutureWarning, module='huggingface_hub.file_download')
 
-from dotenv import load_dotenv
-import os
 load_dotenv()
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "Alfa"
 
-
 from langsmith import Client
-
 client = Client()
 
-
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-
-from langchain_community.document_loaders import RecursiveUrlLoader
-from langchain_community.document_transformers import Html2TextTransformer
-from langchain_community.vectorstores import Chroma
-from langchain_text_splitters import TokenTextSplitter
+# Initialize the embeddings and models
 embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-from langchain_groq import ChatGroq
-
-
-
-
-from datetime import datetime
-from operator import itemgetter
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-
 
 groq_api_key1 = os.getenv('groq_api_key')
 eval_llm = ChatGroq(
@@ -54,16 +38,13 @@ eval_llm = ChatGroq(
     model_name="Llama3-70b-8192"
 )
 
-mmodel = ChatGroq(
-        temperature=1,
-        groq_api_key=groq_api_key1,
-        model_name="mixtral-8x7b-32768"
-    )
 model = ChatGroq(
-        temperature=0,
-        groq_api_key=groq_api_key1,
-          model_name="gemma2-9b-it"
-    )
+    temperature=0,
+    groq_api_key=groq_api_key1,
+    model_name="mixtral-8x7b-32768"
+)
+
+# Define the chain creation function
 def create_chain(retriever):
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -77,11 +58,8 @@ def create_chain(retriever):
         ]
     ).partial(time=str(datetime.now()))
 
-   
-
     response_generator = prompt | model | StrOutputParser()
     chain = (
-        # The runnable map here routes the original inputs to a context and a question dictionary to pass to the response generator
         {
             "context": itemgetter("question")
             | retriever,
@@ -91,28 +69,23 @@ def create_chain(retriever):
     )
     return chain
 
-
-embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-
+# Load the PDF document
 pdf_file_path = "moo2_manual.pdf"
 loader = PyPDFLoader(pdf_file_path)
 docs = loader.load()
 
+# Split the document into chunks
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=300)
+all_splits = text_splitter.split_documents(docs)
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=500)
-all_splits  = text_splitter.split_documents(docs)
-
-
+# Create the vector store and retriever
 vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function)
+retriever = MultiQueryRetriever.from_llm(retriever=vectorstore.as_retriever(), llm=model)
 
-#retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
-
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 8})
-
+# Create the chain
 chain_1 = create_chain(retriever)
 
-
+# Define the prompt template for evaluation
 _PROMPT_TEMPLATE = """You are an expert professor specialized in grading students' answers to questions.
 Grade the student answers based ONLY on their factual accuracy.
 Ignore differences in punctuation and phrasing between the student answer and true answer.
@@ -132,17 +105,35 @@ Grade:
 PROMPT = PromptTemplate(
     input_variables=["query", "answer", "result"], template=_PROMPT_TEMPLATE
 )
+
 eval_config = RunEvalConfig(
-    # We will use the chain-of-thought Q&A correctness evaluator
     evaluators=[
-        RunEvalConfig.QA(llm=eval_llm, # if not provided, the default llm is GPT-4
-                         prompt=PROMPT),
+        RunEvalConfig.QA(llm=eval_llm, prompt=PROMPT),
     ]
 )
 
-results_2 = client.run_on_dataset(
-    dataset_name="MOO_hard3", llm_or_chain_factory=chain_1, evaluation=eval_config
-)
-project_name_2 = results_2["project_name"]
+# Function to handle retries
+def run_with_retries(client, dataset_name, llm_or_chain_factory, evaluation, retries=3):
+    for attempt in range(retries):
+        try:
+            return client.run_on_dataset(
+                dataset_name=dataset_name, llm_or_chain_factory=llm_or_chain_factory, evaluation=evaluation
+            )
+        except Exception as e:
+            if attempt < retries - 1:
+                print(f"Error: {e}. Retrying ({attempt + 1}/{retries})...")
+                time.sleep(1)  # Wait before retrying
+            else:
+                print(f"Failed after {retries} attempts.")
+                raise
 
- 
+# Run the evaluation with retry logic
+results_2 = run_with_retries(
+    client=client,
+    dataset_name="MOO",
+    llm_or_chain_factory=chain_1,
+    evaluation=eval_config
+)
+
+project_name_2 = results_2["project_name"]
+print(f"Project Name: {project_name_2}")

@@ -10,13 +10,14 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain.prompts import PromptTemplate
 from langchain.smith import RunEvalConfig
-from langchain.retrievers.multi_query import MultiQueryRetriever
 import warnings
 from huggingface_hub import file_download
 warnings.filterwarnings("ignore", category=FutureWarning, module='huggingface_hub.file_download')
-
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 from dotenv import load_dotenv
 import os
+from langchain.chains import LLMChain
+
 load_dotenv()
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "Alfa"
@@ -26,70 +27,23 @@ from langsmith import Client
 
 client = Client()
 
+datasets = list(client.list_datasets())
 
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-
-from langchain_community.document_loaders import RecursiveUrlLoader
-from langchain_community.document_transformers import Html2TextTransformer
-from langchain_community.vectorstores import Chroma
-from langchain_text_splitters import TokenTextSplitter
-embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-from langchain_groq import ChatGroq
-
-
-
-
-from datetime import datetime
-from operator import itemgetter
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+examples = list(client.list_examples("9ccd2582-4e24-4e38-874f-db7a16a206f2"))
 
 
 groq_api_key1 = os.getenv('groq_api_key')
+
+llm = ChatGroq(
+    temperature=0,
+    groq_api_key=groq_api_key1,
+    model_name="mixtral-8x7b-32768"
+)
 eval_llm = ChatGroq(
     temperature=0,
     groq_api_key=groq_api_key1,
     model_name="Llama3-70b-8192"
 )
-
-mmodel = ChatGroq(
-        temperature=1,
-        groq_api_key=groq_api_key1,
-        model_name="mixtral-8x7b-32768"
-    )
-model = ChatGroq(
-        temperature=0,
-        groq_api_key=groq_api_key1,
-          model_name="gemma2-9b-it"
-    )
-def create_chain(retriever):
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                "You are a helpful Q&A helper for the documentation, trained to answer questions from the Master of Orion manual."
-                "\nThe current time is {time}.\n\nThe relevant documents will be retrieved in the following messages.",
-            ),
-            ("system", "{context}"),
-            ("human", "{question}"),
-        ]
-    ).partial(time=str(datetime.now()))
-
-   
-
-    response_generator = prompt | model | StrOutputParser()
-    chain = (
-        # The runnable map here routes the original inputs to a context and a question dictionary to pass to the response generator
-        {
-            "context": itemgetter("question")
-            | retriever,
-            "question": itemgetter("question"),
-        }
-        | response_generator
-    )
-    return chain
 
 
 embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
@@ -100,17 +54,56 @@ loader = PyPDFLoader(pdf_file_path)
 docs = loader.load()
 
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=500)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
 all_splits  = text_splitter.split_documents(docs)
 
 
 vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function)
 
-#retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
 
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 8})
+retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
-chain_1 = create_chain(retriever)
+
+system_prompt = (
+  "You are an assistant for question-answering tasks.Provide the answer as a single keyword, number, or name only. "
+  "Use the following pieces of retrieved context to answer "
+  "the question. If you don't know the answer, say that you "
+  "for example if the question is: how much damage does a cyborg weapon deal, then the answer will be: 12, "
+  "that is, only the amount of damage in numerical value,"
+   " or if the question is: what armor has 30 protection, then the answer will only be the name of this armor"
+  "don't know. "
+  "\n\n"
+  "{context}"
+)
+
+prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", "{input}"),
+    ]
+)
+
+template = """Answer the question based only on the following context:
+{context}
+
+Question: {question}
+"""
+prompt = ChatPromptTemplate.from_template(template)
+output_parser = StrOutputParser()
+
+setup_and_retrieval = RunnableParallel(
+    {"context": retriever, "question": RunnablePassthrough()}
+)
+def construct_chain():
+    llm = ChatGroq(
+    temperature=0,
+    groq_api_key=groq_api_key1,
+    model_name="mixtral-8x7b-32768"
+)
+    chain = retriever | prompt | llm
+       
+        
+    return chain
 
 
 _PROMPT_TEMPLATE = """You are an expert professor specialized in grading students' answers to questions.
@@ -140,9 +133,11 @@ eval_config = RunEvalConfig(
     ]
 )
 
-results_2 = client.run_on_dataset(
-    dataset_name="MOO_hard3", llm_or_chain_factory=chain_1, evaluation=eval_config
-)
-project_name_2 = results_2["project_name"]
 
- 
+
+results = client.run_on_dataset(
+    dataset_name="My CSV Dataset",
+    llm_or_chain_factory=construct_chain,
+    concurrency_level=1,
+    evaluation=eval_config
+)

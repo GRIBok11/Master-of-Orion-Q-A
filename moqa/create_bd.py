@@ -21,15 +21,15 @@ import os
 
 client = Client()
 
-csv_file = 'Master of Orion - Sheet1.csv'
-input_keys = ['Вопрос'] # replace with your input column names
-output_keys = ['ответ'] # replace with your output column names
+csv_file = 'Master of Orion nf - Sheet1.csv'
+input_keys = ["question"] # replace with your input column names
+output_keys = ["answer"] # replace with your output column names
 
 dataset = client.upload_csv(
     csv_file=csv_file,
     input_keys=input_keys,
     output_keys=output_keys,
-    name="My CSV Dataset",
+    name="MOO_hard3",
     description="Dataset created from a CSV file",
     data_type="kv"
 )
