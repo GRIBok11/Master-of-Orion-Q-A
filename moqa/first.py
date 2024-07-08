@@ -1,22 +1,21 @@
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from langchain_community.vectorstores import Chroma
+from operator import itemgetter
+from langchain_core.prompts import ChatPromptTemplate
 from langchain.prompts import PromptTemplate
 from langchain.smith import RunEvalConfig
 from langchain.retrievers.multi_query import MultiQueryRetriever
 import warnings
-from huggingface_hub import file_download
 warnings.filterwarnings("ignore", category=FutureWarning, module='huggingface_hub.file_download')
-
 from dotenv import load_dotenv
 import os
+
+
+embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 load_dotenv()
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "Alfa"
@@ -28,24 +27,6 @@ client = Client()
 
 
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-
-from langchain_community.document_loaders import RecursiveUrlLoader
-from langchain_community.document_transformers import Html2TextTransformer
-from langchain_community.vectorstores import Chroma
-from langchain_text_splitters import TokenTextSplitter
-embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-from langchain_groq import ChatGroq
-
-
-
-
-from datetime import datetime
-from operator import itemgetter
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-
 
 groq_api_key1 = os.getenv('groq_api_key')
 eval_llm = ChatGroq(
@@ -55,7 +36,7 @@ eval_llm = ChatGroq(
 )
 
 mmodel = ChatGroq(
-        temperature=1,
+        temperature=0.7,
         groq_api_key=groq_api_key1,
         model_name="mixtral-8x7b-32768"
     )
@@ -70,12 +51,12 @@ def create_chain(retriever):
             (
                 "system",
                 "You are a helpful Q&A helper for the documentation, trained to answer questions from the Master of Orion manual."
-                "\nThe current time is {time}.\n\nThe relevant documents will be retrieved in the following messages.",
+                "\n\nThe relevant documents will be retrieved in the following messages.",
             ),
             ("system", "{context}"),
             ("human", "{question}"),
         ]
-    ).partial(time=str(datetime.now()))
+    )
 
    
 
@@ -94,21 +75,22 @@ def create_chain(retriever):
 
 embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-
+"""
 pdf_file_path = "moo2_manual.pdf"
 loader = PyPDFLoader(pdf_file_path)
 docs = loader.load()
 
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=500)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
 all_splits  = text_splitter.split_documents(docs)
 
 
-vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function)
-
+vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function,persist_directory="vectre")
+"""
+vectorstore = Chroma(persist_directory="vectre", embedding_function=embedding_function)
 #retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
 
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 8})
+retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
 chain_1 = create_chain(retriever)
 
@@ -141,7 +123,7 @@ eval_config = RunEvalConfig(
 )
 
 results_2 = client.run_on_dataset(
-    dataset_name="MOO_hard3", llm_or_chain_factory=chain_1, evaluation=eval_config
+    dataset_name="MOO", llm_or_chain_factory=chain_1, evaluation=eval_config
 )
 project_name_2 = results_2["project_name"]
 

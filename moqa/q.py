@@ -75,7 +75,7 @@ def create_chain(retriever):
             ("system", "{context}"),
             ("human", "{question}"),
         ]
-    ).partial(time=str(datetime.now()))
+    )
 
    
 
@@ -100,15 +100,15 @@ loader = PyPDFLoader(pdf_file_path)
 docs = loader.load()
 
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=500)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=0)
 all_splits  = text_splitter.split_documents(docs)
 
 
 vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function)
 
-#retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
+retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
 
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 8})
+#retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 4})
 
 chain_1 = create_chain(retriever)
 
