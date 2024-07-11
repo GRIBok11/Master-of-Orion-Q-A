@@ -52,8 +52,8 @@ model = ChatGroq(
         #max_tokens=2000,
         groq_api_key=groq_api_key1,
         #streaming=False,  # Disable if not necessar
-        model_name="gemma2-9b-it"
-        #model_name="mixtral-8x7b-32768"
+        #model_name="gemma2-9b-it"
+        model_name="mixtral-8x7b-32768"
     )
 def create_chain(retriever):
     
@@ -121,10 +121,8 @@ retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k
 """
 
 headers_to_split_o = [
-         
-          
-        
-    ]
+       ("#", "Header 1"),
+]
 
 from langchain_community.document_loaders import TextLoader
 
@@ -140,7 +138,7 @@ md_header_splits = markdown_splitter.split_text(data_str)
 
 vectorstore = Chroma.from_documents(documents=md_header_splits, embedding=embedding_function, persist_directory="vectre")
 
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10})
 #similarity_score_threshold
 #retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
 
@@ -182,7 +180,7 @@ eval_config = RunEvalConfig(
 )
 
 results_2 = client.run_on_dataset(
-    dataset_name="MOO", llm_or_chain_factory=chain_1, evaluation=eval_config,concurrency_level=1
+    dataset_name="hard", llm_or_chain_factory=chain_1, evaluation=eval_config,concurrency_level=1
 )
 project_name_2 = results_2["project_name"]
 

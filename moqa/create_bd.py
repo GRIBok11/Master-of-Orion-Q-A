@@ -21,7 +21,7 @@ import os
 
 client = Client()
 
-csv_file = 'Master of Orion nf - Sheet1.csv'
+csv_file = 'Master of Orion  - Sheet1.csv'
 input_keys = ["question"] # replace with your input column names
 output_keys = ["answer"] # replace with your output column names
 
@@ -29,7 +29,7 @@ dataset = client.upload_csv(
     csv_file=csv_file,
     input_keys=input_keys,
     output_keys=output_keys,
-    name="MOO_hard3",
+    name="hard",
     description="Dataset created from a CSV file",
     data_type="kv"
 )

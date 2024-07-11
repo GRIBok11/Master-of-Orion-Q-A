@@ -68,7 +68,7 @@ def create_chain(retriever):
             (
                 "system",
                 "You are a helpful Q&A helper for the documentation, trained to answer questions from the Master of Orion manual."
-                "\nThe current time is {time}.\n\nThe relevant documents will be retrieved in the following messages.",
+                "\nThe relevant documents will be retrieved in the following messages.",
             ),
             ("system", "{context}"),
             ("human", "{question}"),
@@ -98,7 +98,7 @@ loader = PyPDFLoader(pdf_file_path)
 docs = loader.load()
 
 
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=0)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=400)
 all_splits  = text_splitter.split_documents(docs)
 
 
@@ -139,7 +139,7 @@ eval_config = RunEvalConfig(
 )
 
 results_2 = client.run_on_dataset(
-    dataset_name="MOO_hard3", llm_or_chain_factory=chain_1, evaluation=eval_config
+    dataset_name="MOO", llm_or_chain_factory=chain_1, evaluation=eval_config,concurrency_level=1
 )
 project_name_2 = results_2["project_name"]
 
