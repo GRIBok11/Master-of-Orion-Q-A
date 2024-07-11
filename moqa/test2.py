@@ -1,23 +1,25 @@
 from langchain_groq import ChatGroq
+from langchain_text_splitters import MarkdownHeaderTextSplitter
+from python_md import Markdown
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from langchain_community.vectorstores import Chroma
+from operator import itemgetter
+from langchain_community.document_loaders import UnstructuredMarkdownLoader
+from langchain_core.prompts import ChatPromptTemplate
 from langchain.prompts import PromptTemplate
+from langchain_community.document_loaders import TextLoader
 from langchain.smith import RunEvalConfig
+from langchain.retrievers.multi_query import MultiQueryRetriever
 import warnings
-from huggingface_hub import file_download
 warnings.filterwarnings("ignore", category=FutureWarning, module='huggingface_hub.file_download')
-from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 from dotenv import load_dotenv
 import os
-from langchain.chains import LLMChain
 
+
+embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 load_dotenv()
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "Alfa"
@@ -27,27 +29,62 @@ from langsmith import Client
 
 client = Client()
 
-datasets = list(client.list_datasets())
 
-examples = list(client.list_examples("9ccd2582-4e24-4e38-874f-db7a16a206f2"))
 
 
 groq_api_key1 = os.getenv('groq_api_key')
-
-llm = ChatGroq(
-    temperature=0,
-    groq_api_key=groq_api_key1,
-    model_name="mixtral-8x7b-32768"
-)
 eval_llm = ChatGroq(
     temperature=0,
     groq_api_key=groq_api_key1,
     model_name="Llama3-70b-8192"
 )
 
+mmodel = ChatGroq(
+        temperature=1,
+        groq_api_key=groq_api_key1,
+         model_name="Llama3-70b-8192"
+     #  model_name="mixtral-8x7b-32768"
+    )
+model = ChatGroq(
+        temperature=0,
+        groq_api_key=groq_api_key1,
+      
+         model_name="gemma2-9b-it"
+    )
+def create_chain(retriever):
+    
+
+# Пауза на 30 секунд
+ 
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are a helpful Q&A helper for the documentation, trained to answer questions from the Master of Orion manual."
+                "\n\nThe relevant documents will be retrieved in the following messages.",
+            ),
+            ("system", "{context}"),
+            ("human", "{question}"),
+        ]
+    )
+
+   
+
+    response_generator = prompt | model | StrOutputParser()
+    chain = (
+        # The runnable map here routes the original inputs to a context and a question dictionary to pass to the response generator
+        {
+            "context": itemgetter("question")
+            | retriever,
+            "question": itemgetter("question"),
+        }
+        | response_generator
+    )
+    return chain
+
 
 embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
+"""
 
 pdf_file_path = "moo2_manual.pdf"
 loader = PyPDFLoader(pdf_file_path)
@@ -58,52 +95,54 @@ text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=20
 all_splits  = text_splitter.split_documents(docs)
 
 
-vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function)
+vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function,persist_directory="vectre")
 
+vectorstore = Chroma(persist_directory="vectre", embedding_function=embedding_function)
+#retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
 
 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
-
-system_prompt = (
-  "You are an assistant for question-answering tasks.Provide the answer as a single keyword, number, or name only. "
-  "Use the following pieces of retrieved context to answer "
-  "the question. If you don't know the answer, say that you "
-  "for example if the question is: how much damage does a cyborg weapon deal, then the answer will be: 12, "
-  "that is, only the amount of damage in numerical value,"
-   " or if the question is: what armor has 30 protection, then the answer will only be the name of this armor"
-  "don't know. "
-  "\n\n"
-  "{context}"
-)
-
-prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", system_prompt),
-        ("human", "{input}"),
-    ]
-)
-
-template = """Answer the question based only on the following context:
-{context}
-
-Question: {question}
 """
-prompt = ChatPromptTemplate.from_template(template)
-output_parser = StrOutputParser()
 
-setup_and_retrieval = RunnableParallel(
-    {"context": retriever, "question": RunnablePassthrough()}
-)
-def construct_chain():
-    llm = ChatGroq(
-    temperature=0,
-    groq_api_key=groq_api_key1,
-    model_name="mixtral-8x7b-32768"
-)
-    chain = retriever | prompt | llm
-       
-        
-    return chain
+headers_to_split_on = [
+  #  ("#######", "Header 1"),
+]
+
+from langchain_community.document_loaders import TextLoader
+
+loader = TextLoader("moo2.md", encoding="utf-8")
+
+data = loader.load()
+
+data_str = "\n".join([doc.page_content for doc in data])
+
+DEFAULT_HEADER_KEYS = {
+        "#": "Header 1",
+        "##": "Header 2",
+        "###": "Header 3",
+        "####": "Header 4",
+        "#####": "Header 5",
+        "######": "Header 6",
+    }
+
+
+markdown_splitter = MarkdownHeaderTextSplitter(DEFAULT_HEADER_KEYS)
+
+md_header_splits = markdown_splitter.split_text(data_str)
+
+vectorstore = Chroma.from_documents(documents=md_header_splits, embedding=embedding_function, persist_directory="vectre")
+
+retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 6})
+
+#retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
+
+"""
+vectorstore = Chroma(persist_directory="vectre", embedding_function=embedding_function)
+#retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10}), llm=mmodel)
+
+retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10})
+"""
+chain_1 = create_chain(retriever)
 
 
 _PROMPT_TEMPLATE = """You are an expert professor specialized in grading students' answers to questions.
@@ -133,11 +172,9 @@ eval_config = RunEvalConfig(
     ]
 )
 
-
-
-results = client.run_on_dataset(
-    dataset_name="My CSV Dataset",
-    llm_or_chain_factory=construct_chain,
-    concurrency_level=1,
-    evaluation=eval_config
+results_2 = client.run_on_dataset(
+    dataset_name="MOO", llm_or_chain_factory=chain_1, evaluation=eval_config,concurrency_level=1
 )
+project_name_2 = results_2["project_name"]
+
+ 

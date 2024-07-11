@@ -1,12 +1,18 @@
 from langchain_groq import ChatGroq
+from langchain_text_splitters import MarkdownHeaderTextSplitter
+import time 
+from langchain_community.retrievers import BM25Retriever
+from python_md import Markdown
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.output_parsers import StrOutputParser
 from langchain_community.vectorstores import Chroma
 from operator import itemgetter
+from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.prompts import PromptTemplate
+from langchain_community.document_loaders import TextLoader
 from langchain.smith import RunEvalConfig
 from langchain.retrievers.multi_query import MultiQueryRetriever
 import warnings
@@ -36,16 +42,24 @@ eval_llm = ChatGroq(
 )
 
 mmodel = ChatGroq(
-        temperature=0.7,
-        groq_api_key=groq_api_key1,
-        model_name="mixtral-8x7b-32768"
-    )
-model = ChatGroq(
         temperature=0,
         groq_api_key=groq_api_key1,
-          model_name="gemma2-9b-it"
+         model_name="Llama3-70b-8192"
+     #  model_name="mixtral-8x7b-32768"
+    )
+model = ChatGroq(
+        temperature=0.1 ,
+        #max_tokens=2000,
+        groq_api_key=groq_api_key1,
+        streaming=False,  # Disable if not necessar
+        model_name="gemma2-9b-it"
+       # model_name="mixtral-8x7b-32768"
     )
 def create_chain(retriever):
+    
+
+# Пауза на 30 секунд
+    #time.sleep(60)
     prompt = ChatPromptTemplate.from_messages(
         [
             (
@@ -80,17 +94,63 @@ pdf_file_path = "moo2_manual.pdf"
 loader = PyPDFLoader(pdf_file_path)
 docs = loader.load()
 
+loader = TextLoader("moo2.md", encoding="utf-8")
 
+data = loader.load()
+
+text_splitter = RecursiveCharacterTextSplitter(
+    separators=["\n# ", "\n## ", "\n### "],  # Указываем разделители для глав (заголовки Markdown)
+    chunk_size=1000,  # Размер главы в символах
+    chunk_overlap=200  # Перекрытие между главами
+)
+split_docs = text_splitter.split_documents(data)
+retriever = BM25Retriever.from_documents(split_docs)
+"""
+"""
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
 all_splits  = text_splitter.split_documents(docs)
 
 
 vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function,persist_directory="vectre")
-"""
+
 vectorstore = Chroma(persist_directory="vectre", embedding_function=embedding_function)
 #retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
 
 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+
+"""
+
+headers_to_split_on = [
+            ("#", "Header 1"),
+           ("##", "Header 2"),
+            ("###", "Header 3"),
+           ("####", "Header 4"),
+    ]
+
+from langchain_community.document_loaders import TextLoader
+
+loader = TextLoader("moo2.md", encoding="utf-8")
+
+data = loader.load()
+
+data_str = "\n".join([doc.page_content for doc in data])
+
+markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+
+md_header_splits = markdown_splitter.split_text(data_str)
+
+vectorstore = Chroma.from_documents(documents=md_header_splits, embedding=embedding_function, persist_directory="vectre")
+
+#retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 3})
+#similarity_score_threshold
+retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 6}), llm=mmodel)
+
+
+#vectorstore = Chroma(persist_directory="vectre", embedding_function=embedding_function)
+#retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10}), llm=mmodel)
+#retriever = BM25Retriever.from_texts(vectorstore)
+#retriever = BM25Retriever.from_defaults(nodes=vectorstore, similarity_top_k=3)
+#retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10})
 
 chain_1 = create_chain(retriever)
 
@@ -123,7 +183,7 @@ eval_config = RunEvalConfig(
 )
 
 results_2 = client.run_on_dataset(
-    dataset_name="MOO", llm_or_chain_factory=chain_1, evaluation=eval_config
+    dataset_name="MOO", llm_or_chain_factory=chain_1, evaluation=eval_config,concurrency_level=1
 )
 project_name_2 = results_2["project_name"]
 

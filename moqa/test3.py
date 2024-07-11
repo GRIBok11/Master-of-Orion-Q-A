@@ -1,97 +1,148 @@
 from langchain_groq import ChatGroq
+from langchain_text_splitters import MarkdownHeaderTextSplitter
+import time 
+from langchain_community.retrievers import BM25Retriever
+from python_md import Markdown
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from langchain_community.vectorstores import Chroma
+from operator import itemgetter
+from langchain_community.document_loaders import UnstructuredMarkdownLoader
+from langchain_core.prompts import ChatPromptTemplate
 from langchain.prompts import PromptTemplate
+from transformers import pipeline
+from langchain_community.document_loaders import TextLoader
 from langchain.smith import RunEvalConfig
-
+from langsmith import Client
+from langchain.retrievers.multi_query import MultiQueryRetriever
 import warnings
-from huggingface_hub import file_download
 warnings.filterwarnings("ignore", category=FutureWarning, module='huggingface_hub.file_download')
-from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 from dotenv import load_dotenv
 import os
-from langchain.chains import LLMChain, SequentialChain
 load_dotenv()
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_PROJECT"] = "Alfa"
+
 
 from langsmith import Client
 
 client = Client()
 
-datasets = list(client.list_datasets())
-examples = list(client.list_examples("9ccd2582-4e24-4e38-874f-db7a16a206f2"))
 
 groq_api_key1 = os.getenv('groq_api_key')
-
-
-embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-
-pdf_file_path = "moo2_manual.pdf"
-loader = PyPDFLoader(pdf_file_path)
-docs = loader.load()
-
-
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-all_splits  = text_splitter.split_documents(docs)
-
-
-vectorstore = Chroma.from_documents(documents=all_splits, embedding=embedding_function)
-
-
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
-
-llm = ChatGroq(
+eval_llm = ChatGroq(
     temperature=0,
     groq_api_key=groq_api_key1,
+    model_name="Llama3-70b-8192"
+)
+
+mmodel = ChatGroq(
+    temperature=0,
+    groq_api_key=groq_api_key1,
+    model_name="Llama3-70b-8192"
+)
+
+model = ChatGroq(
+    temperature=0.1,
+    groq_api_key=groq_api_key1,
+    streaming=False,
     model_name="mixtral-8x7b-32768"
 )
 
-# Определяем шаблон prompt
-system_prompt = (
-  "You are an assistant for question-answering tasks. Provide the answer as a single keyword, number, or name only. "
-  "Use the following pieces of retrieved context to answer "
-  "the question. If you don't know the answer, say that you "
-  "don't know. For example, if the question is: how much damage does a cyborg weapon deal, then the answer will be: 12, "
-  "that is, only the amount of damage in numerical value, "
-  "or if the question is: what armor has 30 protection, then the answer will only be the name of this armor."
-  "\n\n"
+embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+vectorstore = Chroma(persist_directory="vectre", embedding_function=embedding_function)
+
+# Классификатор для определения темы вопроса
+topic_classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+
+# Извлечение всех возможных заголовков из метаданных
+def extract_headers(vectorstore):
+    all_documents = vectorstore.get_all_documents()
+    headers = set()
+    for doc in all_documents:
+        for key, value in doc.metadata.items():
+            if key.startswith("Header"):
+                headers.add(value)
+    return list(headers)
+
+# Получаем все возможные заголовки
+all_headers = extract_headers(vectorstore)
+
+# Классификация вопроса по динамически извлеченным заголовкам
+def classify_header(question, headers):
+    result = topic_classifier(question, headers)
+    return result["labels"][0]  # Наиболее вероятный заголовок
+
+# Модификация извлекателя для фильтрации по заголовкам
+class HeaderFilteredRetriever:
+    def __init__(self, vectorstore):
+        self.vectorstore = vectorstore
+
+    def retrieve(self, query, header, k=10):
+        all_documents = self.vectorstore.search(query, k=None)  # Извлекаем все документы
+        filtered_documents = [doc for doc in all_documents if header in doc.metadata.values()]
+        return filtered_documents[:k]
+
+# Создание цепочки для обработки запросов
+def create_chain(retriever):
+    time.sleep(60)
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are a helpful Q&A helper for the documentation, trained to answer questions from the Master of Orion manual."
+                "\n\nThe relevant documents will be retrieved in the following messages.",
+            ),
+            ("system", "{context}"),
+            ("human", "{question}"),
+        ]
+    )
+
+    response_generator = prompt | model | StrOutputParser()
+    chain = (
+        {
+            "context": lambda x: retriever.retrieve(x["question"], classify_header(x["question"], all_headers)),
+            "question": itemgetter("question"),
+        }
+        | response_generator
+    )
+    return chain
+
+header_retriever = HeaderFilteredRetriever(vectorstore)
+
+chain_1 = create_chain(header_retriever)
+
+_PROMPT_TEMPLATE = """You are an expert professor specialized in grading students' answers to questions.
+Grade the student answers based ONLY on their factual accuracy.
+Ignore differences in punctuation and phrasing between the student answer and true answer.
+It is OK if the student answer contains more information than the true answer, as long as it does not contain any conflicting statements.
+If the answer contains the phrase: "is not specified in the given context" or similar, then the answer is INCORRECT.
+Begin!
+You are grading the following question:
+{query}
+Here is the real answer:
+{answer}
+You are grading the following predicted answer:
+{result}
+Respond with CORRECT or INCORRECT:
+Grade:
+"""
+
+PROMPT = PromptTemplate(
+    input_variables=["query", "answer", "result"], template=_PROMPT_TEMPLATE
 )
-prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", system_prompt),
-        ("human", "{question}"),
+eval_config = RunEvalConfig(
+    # We will use the chain-of-thought Q&A correctness evaluator
+    evaluators=[
+        RunEvalConfig.QA(llm=eval_llm, # if not provided, the default llm is GPT-4
+                         prompt=PROMPT),
     ]
 )
 
-# Функция для преобразования входных данных
-def input_mapper(example):
-    return {
-        "question": example["Вопрос"]
-    }
-
-
-
-def answ():
-    combine_docs_chain = create_stuff_documents_chain()
-    retrieval_chain = create_retrieval_chain(retriever=retriever, combine_docs_chain=combine_docs_chain)
-    chain = retrieval_chain| prompt | llm
-    return chain
-
-full_chain = answ()
-
-results = client.run_on_dataset(
-    dataset_name="My CSV Dataset",
-    llm_or_chain_factory= full_chain,  # Passing an empty dict to match the function signature
-    concurrency_level=1,
-    input_mapper=input_mapper  # Добавляем input_mapper для преобразования входных данных
+results_2 = client.run_on_dataset(
+    dataset_name="MOO", llm_or_chain_factory=chain_1, evaluation=eval_config,concurrency_level=1
 )
-
+project_name_2 = results_2["project_name"]

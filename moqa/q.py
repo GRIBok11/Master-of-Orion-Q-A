@@ -39,8 +39,6 @@ embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 from langchain_groq import ChatGroq
 
 
-
-
 from datetime import datetime
 from operator import itemgetter
 from langchain_core.output_parsers import StrOutputParser
