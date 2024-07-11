@@ -52,8 +52,8 @@ model = ChatGroq(
         #max_tokens=2000,
         groq_api_key=groq_api_key1,
         streaming=False,  # Disable if not necessar
-        model_name="gemma2-9b-it"
-       # model_name="mixtral-8x7b-32768"
+        #model_name="gemma2-9b-it"
+       model_name="mixtral-8x7b-32768"
     )
 def create_chain(retriever):
     
@@ -120,11 +120,10 @@ retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k
 
 """
 
-headers_to_split_on = [
+headers_to_split_o = [
             ("#", "Header 1"),
            ("##", "Header 2"),
-            ("###", "Header 3"),
-           ("####", "Header 4"),
+        
     ]
 
 from langchain_community.document_loaders import TextLoader
@@ -135,15 +134,15 @@ data = loader.load()
 
 data_str = "\n".join([doc.page_content for doc in data])
 
-markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_o)
 
 md_header_splits = markdown_splitter.split_text(data_str)
 
 vectorstore = Chroma.from_documents(documents=md_header_splits, embedding=embedding_function, persist_directory="vectre")
 
-#retriever = vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 3})
+retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 #similarity_score_threshold
-retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(search_type="mmr", search_kwargs={"k": 6}), llm=mmodel)
+#retriever = MultiQueryRetriever.from_llm(vectorstore.as_retriever(), llm=mmodel)
 
 
 #vectorstore = Chroma(persist_directory="vectre", embedding_function=embedding_function)
