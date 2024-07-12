@@ -119,7 +119,7 @@ vectorstore = Chroma(persist_directory="vectre", embedding_function=embedding_fu
 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
 """
-
+"""
 headers_to_split_o = [
        ("#", "Header 1"),
 ]
@@ -148,7 +148,9 @@ retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k
 #retriever = BM25Retriever.from_texts(vectorstore)
 #retriever = BM25Retriever.from_defaults(nodes=vectorstore, similarity_top_k=3)
 #retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 10})
-
+"""
+vectorstore = Chroma(persist_directory="vectre", embedding_function=embedding_function)
+retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 chain_1 = create_chain(retriever)
 
 
