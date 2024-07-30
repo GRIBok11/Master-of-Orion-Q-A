@@ -58,7 +58,7 @@ markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on)
 
 md_header_splits = markdown_splitter.split_text(markdown_document)
 
-vectorstore = Chroma.from_documents(documents=md_header_splits, embedding=embedding_function, persist_directory="vectre")
+vectorstore = Chroma.from_documents(documents=md_header_splits, embedding=embedding_function, persist_directory="vectre3")
 
 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3})
 
@@ -101,6 +101,9 @@ def answ(text):
     return response["answer"]
 
 
+
+print(answ("Topics:RACE SELECTION.Which race has the most technological advantage?"))
+"""
 print(answ("Maintenance cost of deep core mines in BC?"))
 print(answ("Which form of government do Trilarians have?"))
 print(answ("What is the downside of Klackons?"))
@@ -110,7 +113,7 @@ print(answ("How many levels of miniaturisation do I need for Enveloping weapon m
 print(answ("What is makes proton torpedoes special?"))
 print(answ("Which race has the most technological advantage?"))
 print(answ("Which penalty do Psilons have?"))
-print(answ("Which race can colonize pretty much every world?"))
+
 print(answ("Which system makes ships harder to target in combat and easier to turn?"))
 print(answ("Which armor can add 15 body strength to ground troops?"))
 print(answ("Which button is used to send troops to capture another ship?"))
@@ -123,4 +126,4 @@ print(answ("What tech is provided by the highest level of Sociology?"))
 print(answ("Which tech is provided by Genetic Mutations?"))
 print(answ("Which tech is provided by Tachyon Physics?"))
 print(answ("Which types of androids are there?"))
-
+"""

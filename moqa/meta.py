@@ -1,7 +1,7 @@
 from langchain_groq import ChatGroq
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 import time 
-
+from langchain.chains import LLMChain
 from langchain.storage import InMemoryStore
 from langchain.retrievers import ParentDocumentRetriever
 from langchain_community.retrievers import BM25Retriever
@@ -35,8 +35,6 @@ from langsmith import Client
 client = Client()
 
 
-
-
 groq_api_key1 = os.getenv('groq_api_key')
 
 model = ChatGroq(
@@ -44,42 +42,73 @@ model = ChatGroq(
         groq_api_key=groq_api_key1,
         model_name="mixtral-8x7b-32768"
     )
+import sqlite3
+
+# Путь к базе данных
+database_path = r'd:\hoho\moqa\moqa\vectre_md\chroma.sqlite3'
+
+# Подключение к базе данных
+conn = sqlite3.connect(database_path)
+cursor = conn.cursor()
+
+# Определение запроса
+# Предполагается, что ключевое поле имеет название 'Header' и данные находятся в столбце 'Header 2'
+query = "SELECT DISTINCT string_value FROM embedding_metadata WHERE `key` = ? "
+
+# Значения ключей для фильтрации
+key_value = 'Header 2'
+key_value2 = 'Header 3'
+
+# Выполнение запроса
+cursor.execute(query, (key_value,))
+
+
+# Получение всех строк результата
+rows = cursor.fetchall()
+
+
+
 
 embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+template = """
+Determine with the question related to the game manual to which topic it can be related:
+
+Query: "{query}"
+
+Subject: """
 
 
+
+
+query = " Which race has the most technological advantage?"
+
+
+# Преобразование rows в строку тем
+themes_list = [row[0] for row in rows]
+themes_str = "; ".join(themes_list)
+
+# Шаблон для определения темы, включающий информацию о существующих темах
+tem2 = """
+Here are some existing topics: {themes}
+
+Based on the text provided, determine the most relevant keyword representing the topic discussed:
+Text: "{text}"
+Keyword:
 """
-headers_to_split_o = [
-       ("#", "Header 1"),
-        ("##", "Header 2"),
-         ("###", "Header 3"),
-]
 
-from langchain_community.document_loaders import TextLoader
-
-loader = TextLoader("moo2.md", encoding="utf-8")
-
-data = loader.load()
+# Инициализация шаблона и цепочки
+prompt2 = PromptTemplate(input_variables=["query", "themes"], template=tem2)
+chain2 = LLMChain(llm=model, prompt=prompt2)
 
 
-data_str = "\n".join([doc.page_content for doc in data])
+res= chain2.run(text=query, themes=themes_str)
 
-markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_o)
-
-
-md_header_splits = markdown_splitter.split_text(data_str)
-
-"""
-#vectorstore = Chroma.from_documents(documents=md_header_splits, embedding=embedding_function, persist_directory="vectre_md")
-vectorstore = Chroma(persist_directory="vectre_md", embedding_function=embedding_function)
+print(res)
 
 
-retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3})
 
-documents = retriever.invoke("Computer requirements")
 
-# Обработка и вывод всех найденных документов
-for doc in documents:
-    print(f"Content: {doc.page_content}")
-    print(f"Metadata: {doc.metadata}")
-    print("------")
+
+
+
+conn.close()
